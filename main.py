@@ -37,7 +37,7 @@ async def gold_job():
 async def lifespan(app: FastAPI):
     scheduler.add_job(
         gold_job,
-        CronTrigger(hour="12,16", minute=0, timezone=TZ),
+        CronTrigger(minute=0, timezone=TZ),
         id="gold_job",
         replace_existing=True,
         misfire_grace_time=300,
