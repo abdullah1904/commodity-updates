@@ -9,6 +9,8 @@ from utils import get_random_bot
 
 from graph import workflow
 
+# Allow HTTP HEAD Method for Uptime robot
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gold-bot")
 
@@ -50,6 +52,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
