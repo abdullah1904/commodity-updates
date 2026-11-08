@@ -9,7 +9,6 @@ from utils import get_random_bot
 
 from graph import workflow
 
-# Allow HTTP HEAD Method for Uptime robot
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gold-bot")

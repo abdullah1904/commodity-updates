@@ -6,9 +6,8 @@ from dotenv import load_dotenv
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from datetime import datetime
-from zoneinfo import ZoneInfo
-from utils import get_random_bot, to_slack_mrkdwn
+from utils import get_random_bot, to_slack_mrkdwn, to_speech_text
+import tempfile
 
 load_dotenv()
 
@@ -21,13 +20,15 @@ class State(TypedDict):
     bot_name: str
     bot_image: str
     pageContent: str
-    slackMessage: str
+    slackMessage: str 
+    is_voice: bool
+    audio_path: str   
 
 def scrape(state: State) -> State:
     doc = firecrawl.scrape(os.getenv("GOLD_URL"), formats=["markdown"])
     return {"pageContent": (doc.markdown or "")[:12000], "attempts": 0}
 
-def generate(state: State) -> State:
+def generate_message(state: State) -> State:
     prompt = f"""
         You write a personal gold rate update, sent as a direct message to one person in Pakistan.
 
@@ -70,30 +71,83 @@ def generate(state: State) -> State:
 
     return {"slackMessage": to_slack_mrkdwn(res.choices[0].message.content)}
 
-def send(state: State) -> State:
+def generate_voice(state: State) -> State:
     try:
-        client.chat_postMessage(
-            channel=os.getenv("SLACK_CHANNEL_ID"),
-            text=f'<@{os.getenv("SLACK_USER_ID")}>\n\n{state["slackMessage"]}',
+        prompt = f"""
+        Rewrite this gold rate update as a short spoken script for one person.
+        - Warm, casual, like a friend
+        - Short sentences, each under 150 characters
+        - Say "rupees" instead of "PKR", write out numbers naturally
+        - No emojis, symbols, or extra commentary
+        - Keep every number exactly as given
+
+        TEXT:
+        {state['slackMessage']}
+        """
+        res = groq.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        script = to_speech_text(res.choices[0].message.content)
+
+        res = groq.audio.speech.create(
+            model="canopylabs/orpheus-v1-english",
+            voice="diana",
+            input=to_speech_text(script),
+            response_format="wav",
+        )
+        path = os.path.join(tempfile.gettempdir(), "gold_rate.wav")
+        res.write_to_file(path)
+        return {"is_voice": True, "audio_path": path}
+
+    except groq.RateLimitError:
+        return {"is_voice": False}
+    except Exception as e:
+        return {"is_voice": False}
+        
+
+def send(state: State) -> State:
+    channel = os.getenv("SLACK_CHANNEL_ID")
+    text = f'<@{os.getenv("SLACK_USER_ID")}>\n\n{state["slackMessage"]}'
+
+    try:
+        msg = client.chat_postMessage(
+            channel=channel,
+            text=text,
             mrkdwn=True,
-            username=state['bot_name'],
-            icon_url=state['bot_image'],
+            username=state["bot_name"],
+            icon_url=state["bot_image"],
             unfurl_links=False,
             unfurl_media=False,
         )
     except SlackApiError as e:
         raise RuntimeError(f"Slack error: {e.response['error']}")
+
+    if state.get("is_voice"):
+        try:
+            client.files_upload_v2(
+                channel=channel,
+                file=state["audio_path"],
+                filename="gold_rate.wav",
+                title="Gold rate voice note",
+                thread_ts=msg["ts"],
+            )
+        except SlackApiError as e:
+            pass
     return {}
 
 g = StateGraph(State)
 
 g.add_node("scrape", scrape)
-g.add_node("generate", generate)
+g.add_node("generate_message", generate_message)
+g.add_node("generate_voice", generate_voice)
 g.add_node("send", send)
 
 g.add_edge(START, "scrape")
-g.add_edge("scrape", "generate")
-g.add_edge("generate", "send")
+g.add_edge("scrape", "generate_message")
+g.add_edge("generate_message", "generate_voice")
+g.add_edge("generate_voice", "send")
 g.add_edge("send", END)
 
 workflow = g.compile()
