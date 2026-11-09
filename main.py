@@ -18,14 +18,13 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 async def gold_job():
     log.info("Cron: running gold workflow")
     try:
-        bot = get_random_bot()
         out = await asyncio.to_thread(
             workflow.invoke,
             {
                 "is_voice": False
             },
         )
-        log.info("Cron: sent as %s (attempts=%s)", bot["name"], out.get("attempts"))
+        log.info("Cron: sent as %s (attempts=%s)", out.get("attempts"))
     except Exception:
         log.exception("Cron: workflow failed")
 
