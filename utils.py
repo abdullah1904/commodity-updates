@@ -1,9 +1,5 @@
-from constants import SLACK_BOTS
 import random
 import re
-
-def get_random_bot():
-    return random.choice(SLACK_BOTS)
 
 def to_slack_mrkdwn(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)          

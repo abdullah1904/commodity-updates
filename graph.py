@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from utils import get_random_bot, to_slack_mrkdwn, to_speech_text
+from utils import to_slack_mrkdwn, to_speech_text
 import tempfile
 
 load_dotenv()
@@ -17,8 +17,6 @@ groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
 client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 
 class State(TypedDict):
-    bot_name: str
-    bot_image: str
     pageContent: str
     slackMessage: str 
     is_voice: bool
@@ -116,8 +114,6 @@ def send(state: State) -> State:
             channel=channel,
             text=text,
             mrkdwn=True,
-            username=state["bot_name"],
-            icon_url=state["bot_image"],
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -153,8 +149,6 @@ g.add_edge("send", END)
 workflow = g.compile()
 
 if __name__ == "__main__":
-    bot = get_random_bot()
     workflow.invoke({
-        "bot_name": bot["name"],
-        "bot_image": bot["image"],
+        "is_voice": False
     })

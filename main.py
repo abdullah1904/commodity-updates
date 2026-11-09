@@ -23,8 +23,7 @@ async def gold_job():
         out = await asyncio.to_thread(
             workflow.invoke,
             {
-                "bot_name": bot["name"],
-                "bot_image": bot["image"],
+                "is_voice": False
             },
         )
         log.info("Cron: sent as %s (attempts=%s)", bot["name"], out.get("attempts"))
@@ -36,14 +35,14 @@ async def gold_job():
 async def lifespan(app: FastAPI):
     scheduler.add_job(
         gold_job,
-        CronTrigger(day_of_week="mon-sat", hour="12,16", minute=0, timezone=TZ),
+        CronTrigger(day_of_week="mon-sat", hour="16", minute=0, timezone=TZ),
         id="gold_job",
         replace_existing=True,
         misfire_grace_time=300,
         coalesce=True,
     )
     scheduler.start()
-    log.info("Scheduler started: 12:00 and 16:00 %s", TZ)
+    log.info("Scheduler started: 16:00 %s", TZ)
     yield
     scheduler.shutdown(wait=False)
 
