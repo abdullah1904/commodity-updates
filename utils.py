@@ -1,4 +1,3 @@
-import random
 import re
 
 def to_slack_mrkdwn(text: str) -> str:

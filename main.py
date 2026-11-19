@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from graph import workflow
+from graphs.gold import gold_workflow
+from graphs.silver import silver_workflow
 
 
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +20,20 @@ async def gold_job():
     log.info("Cron: running gold workflow")
     try:
         out = await asyncio.to_thread(
-            workflow.invoke,
+            gold_workflow.invoke,
+            {
+                "is_voice": False
+            },
+        )
+        log.info("Cron: sent as %s (attempts=%s)", out.get("attempts"))
+    except Exception:
+        log.exception("Cron: workflow failed")
+
+async def silver_job():
+    log.info("Cron: running silver workflow")
+    try:
+        out = await asyncio.to_thread(
+            silver_workflow.invoke,
             {
                 "is_voice": False
             },
@@ -35,6 +49,14 @@ async def lifespan(app: FastAPI):
         gold_job,
         CronTrigger(day_of_week="mon-sat", hour="16", minute=0, timezone=TZ),
         id="gold_job",
+        replace_existing=True,
+        misfire_grace_time=300,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        silver_job,
+        CronTrigger(day_of_week="mon-sat", hour="16", minute=0, timezone=TZ),
+        id="silver_job",
         replace_existing=True,
         misfire_grace_time=300,
         coalesce=True,
