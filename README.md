@@ -1,190 +1,166 @@
 # Commodity Updates
 
-Commodity Updates is a Python service that scrapes gold and silver prices, turns the
-source content into a concise update with Groq, and publishes the result to Slack.
-Gold updates can also include a short Urdu voice note when audio generation succeeds.
+Commodity Updates is a Python service that collects gold and silver prices from web pages, formats the figures with Groq, and publishes the updates to Slack. When audio generation succeeds, the service also uploads an Urdu voice note.
 
-The FastAPI application exposes a health endpoint for hosting platforms and starts an
-APScheduler job on application startup. The scheduled gold job runs Monday through
-Saturday at **16:00 Asia/Karachi**.
+The service is built with FastAPI, LangGraph, Firecrawl, Groq, Slack SDK, and APScheduler.
 
-## What it does
+## How it works
 
-1. Firecrawl retrieves the configured gold or silver price page.
-2. Groq generates a Slack-formatted update using only the scraped figures.
-3. The Slack bot posts the update and mentions the configured user.
-4. Groq optionally creates an Urdu voice note and uploads it to the same channel.
+Each commodity workflow runs these steps:
 
-The current scheduler in `main.py` runs the gold workflow. The silver workflow is
-available in `graphs/silver.py` but is not scheduled by default.
+1. Firecrawl scrapes the configured source URL as Markdown.
+2. The workflow keeps the first 12,000 characters of the scraped content.
+3. Groq generates a concise Slack message using only the figures in that content.
+4. Groq rewrites the message as spoken Pakistani Urdu and generates a WAV voice
+   note.
+5. The service mentions the configured Slack member, posts the text update, and
+   uploads the voice note when audio generation was successful.
+
+The gold workflow reports 24 and 21 carat prices for one tola and one gram. The silver workflow reports the one-tola price. Both workflows include a trend when the scraped source provides change data.
+
+## Scheduled jobs
+
+When the FastAPI application starts, it registers both workflows with an
+in-process scheduler:
+
+- **Gold:** Monday through Saturday at 04:00 PM
+- **Silver:** Monday through Saturday at 04:00 PM
+- **Timezone:** `Asia/Karachi`
+- **Misfire grace period:** 5 minutes
+
+Run only one service instance. Each instance registers both jobs, so multiple instances will send duplicate Slack updates. The scheduler does not run on Sunday.
 
 ## Requirements
 
 - Python 3.13 or newer
+- [uv](https://docs.astral.sh/uv/)
 - A [Firecrawl](https://www.firecrawl.dev/) API key
-- A [Groq](https://console.groq.com/) API key with access to the configured text and
-  audio models
-- A Slack workspace where you can install a Slack app
-- [uv](https://docs.astral.sh/uv/) for the recommended local setup, or another Python
-  environment manager
-
-## Slack app setup
-
-Create a Slack app at <https://api.slack.com/apps>:
-
-1. Select **Create New App** and choose **From scratch**.
-2. Under **OAuth & Permissions**, add these **Bot Token Scopes**:
-   - `chat:write` — post commodity updates.
-   - `files:write` — upload the optional voice note.
-3. Install or reinstall the app in your workspace and copy the **Bot User OAuth
-   Token**. It normally starts with `xoxb-`.
-4. Invite the app to the destination channel with `/invite @YourApp`.
-5. Copy the channel ID. In Slack, open the channel and choose **View channel
-   details**; the channel ID is shown at the bottom.
-6. Copy the Slack user ID of the person who should be mentioned. Open that user's
-   profile, choose **More**, then **Copy member ID**.
-
-Do not commit the bot token or any other secret. Store them in `.env` locally and in
-Render's environment variables in production.
+- A [Groq](https://console.groq.com/) API key with access to:
+  - `openai/gpt-oss-120b`
+  - `canopylabs/orpheus-arabic-saudi`
+- A Slack workspace where you can install a bot
 
 ## Configuration
 
-Copy the example file and fill in every value:
+Create a `.env` file in the project root. The application loads it when the commodity workflow modules are imported.
 
-```bash
-cp .env.example .env
+```dotenv
+FIRECRAWL_API_KEY=your-firecrawl-api-key
+GROQ_API_KEY=your-groq-api-key
+GOLD_URL=https://example.com/gold-prices
+SILVER_URL=https://example.com/silver-prices
+SLACK_BOT_TOKEN=xoxb-your-token
+SLACK_CHANNEL_ID=your-channel-id
+SLACK_USER_ID=your-member-id
 ```
 
-| Variable | Description |
+| Variable | Purpose |
 | --- | --- |
-| `FIRECRAWL_API_KEY` | Firecrawl API key used to scrape the price pages. |
-| `GROQ_API_KEY` | Groq API key used for text and optional voice generation. |
-| `GOLD_URL` | URL containing the gold prices to scrape. |
-| `SILVER_URL` | URL containing the silver price to scrape. |
-| `SLACK_BOT_TOKEN` | Slack bot token, usually beginning with `xoxb-`. |
-| `SLACK_CHANNEL_ID` | ID of the channel where updates are posted. |
-| `SLACK_USER_ID` | Slack member ID to mention in each update. |
+| `FIRECRAWL_API_KEY` | Authenticates Firecrawl scraping requests. |
+| `GROQ_API_KEY` | Authenticates text and speech requests to Groq. |
+| `GOLD_URL` | Source page for gold rates. |
+| `SILVER_URL` | Source page for silver rates. |
+| `SLACK_BOT_TOKEN` | Slack bot token, normally beginning with `xoxb-`. |
+| `SLACK_CHANNEL_ID` | Channel where both updates are posted. |
+| `SLACK_USER_ID` | Slack member ID mentioned above each update. |
 
-The source page should expose the relevant prices in text or Markdown. The generated
-message is intentionally limited to figures found in the scraped content; it is not a
-market-data validation service.
+The source pages should expose the relevant rates and any trend information in
+text or Markdown. The workflows do not independently validate market data and
+do not calculate missing values.
 
-## Run locally
+## Slack app setup
 
-Install dependencies from the lockfile:
+Create an app at <https://api.slack.com/apps>, then:
+
+1. Add the bot token scopes `chat:write` and `files:write` under **OAuth &
+   Permissions**.
+2. Install the app in the workspace and copy its bot token.
+3. Invite the app to the destination channel with `/invite @YourApp`.
+4. Copy the channel ID from the channel details.
+5. Copy the member ID of the person who should be mentioned.
+
+Keep all tokens in `.env` or your hosting provider's secret environment
+variables. Never commit them.
+
+## Local development
+
+Install the locked dependencies:
 
 ```bash
 uv sync
 ```
 
-Start the API:
+Start the API and scheduler:
 
 ```bash
 uv run uvicorn main:app --reload
 ```
 
-Check that the application is running:
+Check the health endpoint:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Expected response:
+The response is:
 
 ```json
 {"status":"ok"}
 ```
 
-The scheduler runs when the application starts. To test a workflow immediately, run
-its module directly after configuring `.env`:
+To run either workflow immediately instead of waiting for the scheduler:
 
 ```bash
 uv run python graphs/gold.py
 uv run python graphs/silver.py
 ```
 
-These commands call external APIs and can create a real Slack message and incur
-provider usage. Use a test channel and test source URLs first.
+These commands call Firecrawl, Groq, and Slack. Use a test channel and test
+URLs because a successful run posts a real message and may consume provider
+quotas.
 
-## Deploy on Render
+## Deployment
 
-Create a **Web Service** on [Render](https://render.com/):
+The application can run as a long-lived web service on a platform such as
+[Render](https://render.com/).
 
-1. Push this repository to GitHub or another Git provider.
-2. In Render, choose **New → Web Service** and select the repository.
-3. Use these settings:
+| Setting | Value |
+| --- | --- |
+| Runtime | Python 3 |
+| Build command | `pip install uv && uv sync --frozen` |
+| Start command | `uv run uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/health` |
 
-   | Setting | Value |
-   | --- | --- |
-   | Runtime | Python 3 |
-   | Build command | `pip install uv && uv sync --frozen` |
-   | Start command | `uv run uvicorn main:app --host 0.0.0.0 --port $PORT` |
-   | Health check path | `/health` |
+Configure every variable from the table above in the service's environment. Use the platform-provided `PORT` value and keep one instance running continuously; sleeping or restarting around 04:00 PM can delay or skip a job.
 
-4. Add all variables from the configuration table under **Environment**. Do not
-   upload `.env` to the repository.
-5. Choose a plan that keeps the service running continuously. A sleeping service can
-   miss the scheduled 16:00 job.
-6. Deploy and wait for the health check to pass.
-7. Open the Render service URL and confirm `/health` returns `{"status":"ok"}`.
-
-Render's `PORT` variable must be used in the start command. Binding to
-`127.0.0.1` or hard-coding port `8000` will prevent Render from routing traffic to
-the service.
-
-### Render scheduling considerations
-
-The scheduler is in-process. Run exactly one always-on Render instance to avoid
-duplicate Slack messages. If you scale the service horizontally, every instance will
-register the same cron job.
-
-The job uses the `Asia/Karachi` timezone and has a five-minute misfire grace period.
-Render restarts, deploys, sleeping services, or outages around 16:00 can therefore
-cause an update to be delayed or skipped.
-
-## Project layout
+## Project structure
 
 ```text
 main.py            FastAPI app, health endpoint, and scheduler
-utils.py           Slack and speech text formatting helpers
+utils.py           Slack Markdown and speech-text formatting helpers
 graphs/gold.py     Gold scraping, generation, and Slack delivery workflow
 graphs/silver.py   Silver scraping, generation, and Slack delivery workflow
-.env.example       Required environment variable template
 pyproject.toml     Project metadata and dependencies
 uv.lock            Locked dependency versions
 ```
 
-## Pre-deployment check
-
-The checked-in `main.py` imports `workflow` from a top-level `graph` module, while
-the visible workflow implementation is `gold_workflow` in `graphs/gold.py`. Before
-deploying, make sure that import points to the workflow you intend to schedule (or
-provide the `graph.py` module expected by `main.py`). Also ensure that any helper
-imports used by the selected workflow exist in `utils.py`.
-
-A quick import check is:
-
-```bash
-uv run python -c "import main; print(main.app)"
-```
-
-If this command fails, fix the import error before creating the Render service.
-
 ## Troubleshooting
 
-- **`invalid_auth` or `not_in_channel`**: verify `SLACK_BOT_TOKEN`, invite the bot
-  to the channel, and confirm `SLACK_CHANNEL_ID`.
-- **No mention appears**: verify `SLACK_USER_ID` is a member ID, not a username or
-  display name.
-- **Firecrawl returns empty content**: check `GOLD_URL` or `SILVER_URL`, the page's
-  accessibility, and Firecrawl usage limits.
-- **Voice upload is missing**: the text update can still succeed when Groq audio
-  generation is rate-limited or fails; inspect the Render logs for the voice error.
-- **No scheduled message**: confirm the service is running continuously, only one
-  instance is deployed, and the expected time is 16:00 in Pakistan Standard Time.
+- **`invalid_auth` or `not_in_channel`:** verify `SLACK_BOT_TOKEN`, invite the
+  bot to the channel, and confirm `SLACK_CHANNEL_ID`.
+- **The mention is missing:** use a Slack member ID in `SLACK_USER_ID`, not a
+  username or display name.
+- **The text update is posted but no voice note appears:** inspect the
+  application logs. Groq rate limits and other audio-generation errors cause
+  the workflow to continue without the voice upload.
+- **The scraped content is empty or incomplete:** verify the relevant source
+  URL and that Firecrawl can access the page.
+- **Scheduled updates are duplicated:** run only one application instance.
+- **No scheduled update is sent:** confirm the service is running, the
+  environment variables are present, and the expected time is 04:00 PM in
+  `Asia/Karachi`.
 
 ## Security
 
-Treat Slack, Firecrawl, and Groq keys as secrets. Rotate them immediately if they
-are exposed, and use Render's secret environment variables instead of putting them
-in source control or README examples.
+Treat Slack, Firecrawl, and Groq credentials as secrets. If a credential is
+exposed, revoke or rotate it immediately and remove it from source control.
